@@ -3,13 +3,15 @@ import zipfile
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
 # 1. Load data
 with zipfile.ZipFile("playground-series-s5e7.zip") as z:
@@ -24,6 +26,10 @@ print("Test shape:", test.shape)
 # 2. Separate features and target
 X = train.drop(columns=["Personality", "id"])
 y = train["Personality"]
+
+# Encode target labels (Extrovert -> 1, Introvert -> 0)
+le = LabelEncoder()
+y_encoded = le.fit_transform(y)
 
 # 3. Split into numeric and categorical columns
 num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
@@ -40,11 +46,6 @@ num_transformer = Pipeline(steps=[
 
 cat_transformer = Pipeline(steps=[
     ("imputer", SimpleImputer(strategy="most_frequent")),
-    ("encoder", LabelEncoder())  # NOTE: we’ll adjust this
-])
-
-cat_transformer = Pipeline(steps=[
-    ("imputer", SimpleImputer(strategy="most_frequent")),
     ("encoder", OneHotEncoder(handle_unknown="ignore"))
 ])
 
@@ -55,27 +56,57 @@ preprocessor = ColumnTransformer(
     ]
 )
 
-# 5. Build model pipeline
-clf = Pipeline(steps=[
-    ("preprocessor", preprocessor),
-    ("classifier", LogisticRegression(max_iter=1000))
-])
+# 5. Define models
+models = {
+    "Logistic Regression": LogisticRegression(max_iter=1000),
+    "Random Forest": RandomForestClassifier(n_estimators=300, random_state=42),
+    "XGBoost": XGBClassifier(
+        n_estimators=500,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        use_label_encoder=False,
+        eval_metric="logloss"
+    )
+}
 
 # 6. Train/val split
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42)
 
-# 7. Fit model
-clf.fit(X_train, y_train)
+# 7. Evaluate all models
+best_model = None
+best_acc = 0
 
-# 8. Evaluate
-y_pred = clf.predict(X_val)
-print("\nClassification Report:\n", classification_report(y_val, y_pred))
-print("\nConfusion Matrix:\n", confusion_matrix(y_val, y_pred))
+for name, model in models.items():
+    clf = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("classifier", model)
+    ])
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_val)
 
-# 9. Predict on test.csv (if needed for submission)
+    acc = accuracy_score(y_val, y_pred)
+    print(f"\n=== {name} ===")
+    print("Accuracy:", acc)
+    print("Classification Report:\n", classification_report(y_val, y_pred, target_names=le.classes_))
+    print("Confusion Matrix:\n", confusion_matrix(y_val, y_pred))
+
+    if acc > best_acc:
+        best_acc = acc
+        best_model = clf
+        best_name = name
+
+print(f"\nBest model: {best_name} with accuracy {best_acc:.4f}")
+
+# 8. Predict on test.csv with best model
 test_ids = test["id"]
 X_test = test.drop(columns=["id"])
-test_preds = clf.predict(X_test)
+test_preds_encoded = best_model.predict(X_test)
+
+# Decode predictions back to original labels
+test_preds = le.inverse_transform(test_preds_encoded)
 
 submission = pd.DataFrame({
     "id": test_ids,
