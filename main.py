@@ -60,16 +60,7 @@ preprocessor = ColumnTransformer(
 models = {
     "Logistic Regression": LogisticRegression(max_iter=1000),
     "Random Forest": RandomForestClassifier(n_estimators=300, random_state=42),
-    "XGBoost": XGBClassifier(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=6,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        use_label_encoder=False,
-        eval_metric="logloss"
-    )
+    "XGBoost": XGBClassifier(n_estimators=500, random_state=42)
 }
 
 # 6. Train/val split
